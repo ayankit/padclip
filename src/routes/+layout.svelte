@@ -1,4 +1,5 @@
 <script lang="ts">
+	import './layout.css';
 	import faviconIco from '$lib/assets/favicon.ico';
 	import faviconSvg from '$lib/assets/favicon.svg';
 
