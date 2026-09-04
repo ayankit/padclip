@@ -8,6 +8,7 @@
 		"build": "wrangler types --check && vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
+		"test": "node --test tests/*.test.mjs",
 		"check": "wrangler types --check && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"gen": "wrangler types",
