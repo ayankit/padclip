@@ -1,6 +1,6 @@
-# Clipped architecture
+# PadClip architecture
 
-This document records the current decisions for Clipped. It describes the first version we intend to build, plus the few areas we have deliberately left for later.
+This document records the current decisions for PadClip. It describes the first version we intend to build, plus the few areas we have deliberately left for later.
 
 ## Product behavior
 

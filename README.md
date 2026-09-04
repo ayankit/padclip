@@ -1,6 +1,6 @@
-# Clipped
+# PadClip
 
-Clipped is a temporary shared pad for Markdown and source code. Opening the app creates a short URL that anyone with access can use to read, edit, and manually save the pad.
+PadClip is a temporary shared pad for Markdown and source code. Opening the app creates a short URL that anyone with access can use to read, edit, and manually save the pad.
 
 The project is in early development. The current product plan includes:
 
@@ -57,4 +57,4 @@ pnpm build
 
 ## Documentation
 
-See [Clipped architecture](docs/architecture.md) for the current storage, expiry, editor, password, save, and conflict-handling decisions.
+See [PadClip architecture](docs/architecture.md) for the current storage, expiry, editor, password, save, and conflict-handling decisions.
