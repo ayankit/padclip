@@ -18,8 +18,8 @@ export const padAuth = sqliteTable('pad_auth', {
 		.notNull()
 		.primaryKey()
 		.references(() => pads.id, { onDelete: 'cascade' }),
-	passwordSalt: blob('password_salt', { mode: 'buffer' }).notNull(),
-	passwordVerifier: blob('password_verifier', { mode: 'buffer' }).notNull()
+	passwordSalt: blob('password_salt', { mode: 'buffer' }).$type<Uint8Array>().notNull(),
+	passwordVerifier: blob('password_verifier', { mode: 'buffer' }).$type<Uint8Array>().notNull()
 });
 
 export type Pad = typeof pads.$inferSelect;

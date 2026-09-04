@@ -7,6 +7,14 @@ export const PBKDF2_ITERATIONS = 600_000;
 export const PASSWORD_MIN_BYTES = 8;
 export const PASSWORD_MAX_BYTES = 256;
 
+type ByteSource = Uint8Array<ArrayBufferLike> | ArrayBuffer;
+
+function copyToArrayBuffer(source: ByteSource): ArrayBuffer {
+	if (source instanceof ArrayBuffer) return source;
+
+	return new Uint8Array(source).buffer;
+}
+
 export function getPasswordValidationError(password: string): string | null {
 	const length = encoder.encode(password).byteLength;
 
@@ -25,7 +33,7 @@ export function generatePasswordSalt(): Uint8Array<ArrayBuffer> {
 	return crypto.getRandomValues(new Uint8Array(SALT_BYTES));
 }
 
-async function deriveVerifierKey(password: string, salt: BufferSource): Promise<CryptoKey> {
+async function deriveVerifierKey(password: string, salt: ByteSource): Promise<CryptoKey> {
 	const passwordKey = await crypto.subtle.importKey(
 		'raw',
 		encoder.encode(password),
@@ -39,7 +47,7 @@ async function deriveVerifierKey(password: string, salt: BufferSource): Promise<
 			name: 'PBKDF2',
 			hash: 'SHA-256',
 			iterations: PBKDF2_ITERATIONS,
-			salt
+			salt: copyToArrayBuffer(salt)
 		},
 		passwordKey,
 		{ name: 'HMAC', hash: 'SHA-256', length: 256 },
@@ -50,7 +58,7 @@ async function deriveVerifierKey(password: string, salt: BufferSource): Promise<
 
 export async function createPasswordVerifier(
 	password: string,
-	salt: BufferSource
+	salt: ByteSource
 ): Promise<Uint8Array<ArrayBuffer>> {
 	const key = await deriveVerifierKey(password, salt);
 	const signature = await crypto.subtle.sign('HMAC', key, PASSWORD_VERIFIER_CONTEXT);
@@ -60,10 +68,10 @@ export async function createPasswordVerifier(
 
 export async function verifyPassword(
 	password: string,
-	salt: BufferSource,
-	verifier: BufferSource
+	salt: ByteSource,
+	verifier: ByteSource
 ): Promise<boolean> {
 	const key = await deriveVerifierKey(password, salt);
 
-	return crypto.subtle.verify('HMAC', key, verifier, PASSWORD_VERIFIER_CONTEXT);
+	return crypto.subtle.verify('HMAC', key, copyToArrayBuffer(verifier), PASSWORD_VERIFIER_CONTEXT);
 }
