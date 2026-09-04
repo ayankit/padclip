@@ -3,7 +3,8 @@
 	import MarkdownEditor from '$lib/MarkdownEditor.svelte';
 	import { onMount } from 'svelte';
 
-	type ViewState = 'loading' | 'locked' | 'ready' | 'not_found' | 'error';
+	type ViewState = 'loading' | 'locked' | 'ready' | 'recovery' | 'not_found' | 'error';
+	type UnlockIntent = 'initial_load' | 'resume_save';
 
 	const maxContentBytes = 1_500_000;
 	const padId = $derived(page.params.id);
@@ -17,8 +18,9 @@
 	let message = $state('');
 	let conflictContent = $state<string | null>(null);
 	let conflictVersion = $state<number | null>(null);
+	let unlockIntent = $state<UnlockIntent>('initial_load');
 	const contentBytes = $derived(new TextEncoder().encode(content).byteLength);
-	const dirty = $derived(viewState === 'ready' && content !== savedContent);
+	const dirty = $derived(content !== savedContent);
 
 	async function loadPad() {
 		viewState = 'loading';
@@ -28,6 +30,7 @@
 			const response = await fetch(`/api/pads/${padId}`);
 
 			if (response.status === 401) {
+				unlockIntent = 'initial_load';
 				viewState = 'locked';
 				return;
 			}
@@ -72,7 +75,14 @@
 			}
 
 			password = '';
-			await loadPad();
+
+			if (unlockIntent === 'resume_save') {
+				unlockIntent = 'initial_load';
+				viewState = 'ready';
+				await save();
+			} else {
+				await loadPad();
+			}
 		} catch {
 			message = 'The pad could not be unlocked.';
 		} finally {
@@ -106,12 +116,15 @@
 			}
 
 			if (response.status === 401) {
+				unlockIntent = 'resume_save';
 				viewState = 'locked';
+				message = 'Your session expired. Unlock to save your draft.';
 				return;
 			}
 
 			if (response.status === 404) {
-				viewState = 'not_found';
+				viewState = dirty ? 'recovery' : 'not_found';
+				if (dirty) message = 'The pad expired or was removed. Copy your draft before leaving.';
 				return;
 			}
 
@@ -127,6 +140,15 @@
 			message = 'The pad could not be saved.';
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function copyDraft() {
+		try {
+			await navigator.clipboard.writeText(content);
+			message = 'Draft copied.';
+		} catch {
+			message = 'The draft could not be copied. Select the text in the editor instead.';
 		}
 	}
 
@@ -216,6 +238,25 @@
 						Discard local edits and load latest
 					</button>
 				{/if}
+			</footer>
+		</section>
+	{:else if viewState === 'recovery'}
+		<section class="grid h-dvh grid-rows-[auto_minmax(0,1fr)_auto]">
+			<header class="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-white px-4 py-3">
+				<a class="font-semibold" href="/">Clipped</a>
+				<span class="font-mono text-xs text-zinc-500">{padId}</span>
+				<span class="ml-auto text-sm font-medium text-red-700">Pad unavailable</span>
+			</header>
+
+			<div class="min-h-0 p-3 sm:p-5">
+				<MarkdownEditor bind:value={content} label={`Recover Markdown pad ${padId}`} />
+			</div>
+
+			<footer class="flex flex-wrap items-center gap-3 border-t border-zinc-200 bg-white px-4 py-2 text-xs text-zinc-600">
+				<p class="text-red-700">{message}</p>
+				<button class="ml-auto font-medium underline" type="button" onclick={copyDraft}>
+					Copy draft
+				</button>
 			</footer>
 		</section>
 	{:else if viewState === 'not_found'}

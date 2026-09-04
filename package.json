@@ -5,7 +5,8 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "wrangler types --check && vite build",
+		"build": "wrangler types --check && vite build && pnpm build:cleanup",
+		"build:cleanup": "wrangler deploy --dry-run --config wrangler.cleanup.jsonc --outdir .wrangler/cleanup-build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"test": "node --test tests/*.test.mjs",
@@ -14,7 +15,9 @@
 		"gen": "wrangler types",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate:local": "wrangler d1 migrations apply DB --local",
-		"db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+		"db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+		"dev:cleanup": "wrangler dev --config wrangler.cleanup.jsonc --test-scheduled",
+		"deploy:cleanup": "wrangler deploy --config wrangler.cleanup.jsonc"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-cloudflare": "^7.2.9",

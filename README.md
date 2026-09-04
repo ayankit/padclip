@@ -8,7 +8,9 @@ The current proof of concept includes:
 - salted PBKDF2 password verifiers stored in Cloudflare D1
 - signed, pad-specific session cookies
 - rate-limited password attempts
+- rate-limited pad creation with a 10,000-active-pad capacity guard
 - explicit saves with version-based conflict detection
+- request-time expiry plus hourly deletion after 24 hours without a save
 - a 1,500,000-byte content limit
 - CodeMirror Markdown and fenced-code syntax highlighting
 
@@ -65,11 +67,12 @@ Store the signing key as a Worker secret. It signs session cookies and is not us
 ```sh
 pnpm exec wrangler secret put SESSION_SIGNING_KEY
 pnpm db:migrate:remote
+pnpm deploy:cleanup
 ```
 
 Use a random value with at least 32 bytes of entropy. Rotating it invalidates existing sessions but does not affect passwords or pad content.
 
-Pad rows contain an `updated_at` timestamp and the repository includes the expiry deletion operation. Wiring that operation to an hourly Cloudflare Cron Trigger requires a custom Worker entry point around SvelteKit's generated HTTP worker and is not part of this auth-focused branch.
+The application rejects expired pads at request time. The separate `padclip-cleanup` Worker runs hourly and deletes expired rows from D1. Deploy both Workers against the same database.
 
 ## Documentation
 

@@ -1,0 +1,19 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "padclip-cleanup",
+	"main": "src/workers/cleanup.ts",
+	"compatibility_flags": ["nodejs_als"],
+	"compatibility_date": "2026-09-04",
+	"triggers": {
+		"crons": ["0 * * * *"]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "padclip",
+			"database_id": "f0a7c49b-3d3e-4fd5-8a87-f111150e937c",
+			"migrations_dir": "./drizzle",
+			"migrations_pattern": "./drizzle/*/migration.sql"
+		}
+	]
+}

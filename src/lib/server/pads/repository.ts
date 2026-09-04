@@ -1,12 +1,12 @@
-import { and, eq, lt } from 'drizzle-orm';
+import { and, count, eq, gt } from 'drizzle-orm';
 
 import { getDb } from '$lib/server/db';
 import { padAuth, pads } from '$lib/server/db/schema';
 import {
 	MAX_CONTENT_BYTES,
-	PAD_LIFETIME_SECONDS,
 	generatePadId,
-	getContentByteLength
+	getContentByteLength,
+	getPadExpiryCutoff
 } from '$lib/server/pads/model';
 
 const MAX_CREATE_ATTEMPTS = 8;
@@ -76,16 +76,25 @@ export async function createPad(
 	throw new Error('Could not allocate a unique pad ID.');
 }
 
-export async function getPad(database: D1Database, padId: string): Promise<StoredPad | null> {
+export async function getPad(
+	database: D1Database,
+	padId: string,
+	now = Math.floor(Date.now() / 1000)
+): Promise<StoredPad | null> {
 	const db = getDb(database);
-	const [pad] = await db.select().from(pads).where(eq(pads.id, padId)).limit(1);
+	const [pad] = await db
+		.select()
+		.from(pads)
+		.where(and(eq(pads.id, padId), gt(pads.updatedAt, getPadExpiryCutoff(now))))
+		.limit(1);
 
 	return pad ?? null;
 }
 
 export async function getPadAuth(
 	database: D1Database,
-	padId: string
+	padId: string,
+	now = Math.floor(Date.now() / 1000)
 ): Promise<StoredPadAuth | null> {
 	const db = getDb(database);
 	const [auth] = await db
@@ -94,7 +103,8 @@ export async function getPadAuth(
 			passwordVerifier: padAuth.passwordVerifier
 		})
 		.from(padAuth)
-		.where(eq(padAuth.padId, padId))
+		.innerJoin(pads, eq(padAuth.padId, pads.id))
+		.where(and(eq(padAuth.padId, padId), gt(pads.updatedAt, getPadExpiryCutoff(now))))
 		.limit(1);
 
 	return auth ?? null;
@@ -104,14 +114,15 @@ export async function savePad(
 	database: D1Database,
 	padId: string,
 	content: string,
-	expectedVersion: number
+	expectedVersion: number,
+	now = Math.floor(Date.now() / 1000)
 ): Promise<SavePadResult> {
 	const contentBytes = getContentByteLength(content);
 
 	if (contentBytes > MAX_CONTENT_BYTES) throw new Error('Pad content exceeds the size limit.');
 
 	const db = getDb(database);
-	const updatedAt = Math.floor(Date.now() / 1000);
+	const updatedAt = now;
 	const [updated] = await db
 		.update(pads)
 		.set({
@@ -120,25 +131,31 @@ export async function savePad(
 			version: expectedVersion + 1,
 			updatedAt
 		})
-		.where(and(eq(pads.id, padId), eq(pads.version, expectedVersion)))
+		.where(
+			and(
+				eq(pads.id, padId),
+				eq(pads.version, expectedVersion),
+				gt(pads.updatedAt, getPadExpiryCutoff(now))
+			)
+		)
 		.returning({ version: pads.version });
 
 	if (updated) return { status: 'saved', version: updated.version, updatedAt };
 
-	const current = await getPad(database, padId);
+	const current = await getPad(database, padId, now);
 
 	return current ? { status: 'conflict', pad: current } : { status: 'not_found' };
 }
 
-export async function deleteExpiredPads(
+export async function countActivePads(
 	database: D1Database,
 	now = Math.floor(Date.now() / 1000)
 ): Promise<number> {
 	const db = getDb(database);
-	const deleted = await db
-		.delete(pads)
-		.where(lt(pads.updatedAt, now - PAD_LIFETIME_SECONDS))
-		.returning({ id: pads.id });
+	const [result] = await db
+		.select({ value: count() })
+		.from(pads)
+		.where(gt(pads.updatedAt, getPadExpiryCutoff(now)));
 
-	return deleted.length;
+	return result?.value ?? 0;
 }

@@ -66,16 +66,16 @@ Timestamps use UTC Unix seconds. Keeping authentication data in a separate row m
 
 ## Expiry and cleanup
 
-Pads expire through deletion, not through read-time rejection.
+Pads expire through request-time rejection and scheduled deletion.
 
-The repository implements deletion of pads whose `updated_at` is more than 24 hours old. This makes the intended policy 24 hours since the last successful save.
+Every read, password lookup, and save filters out pads whose `updated_at` is at least 24 hours old. This makes expiry immediate even when scheduled cleanup has not run yet.
 
 ```sql
 DELETE FROM pads
-WHERE updated_at < unixepoch() - 86400;
+WHERE updated_at <= unixepoch() - 86400;
 ```
 
-The foreign key removes the matching `pad_auth` row with the pad. Wiring this operation to an hourly Cloudflare Cron Trigger is deferred because the SvelteKit adapter generates an HTTP-only Worker entry point. That deployment step needs a custom wrapper entry point. Once enabled, periodic cleanup means a pad can remain available for part of the next hour; if cleanup deletes an open pad, its next save returns not found.
+The separate `padclip-cleanup` Worker runs hourly because the SvelteKit adapter owns the HTTP Worker entry point. It shares the D1 binding and deletes expired rows. The foreign key removes the matching `pad_auth` row with the pad. If cleanup deletes an open pad, its next save returns not found while the browser keeps the local draft available for copying.
 
 ## Saving and conflicts
 
@@ -155,7 +155,7 @@ The cookie uses a `__Host-` name plus `Path=/`, `HttpOnly`, `Secure`, and `SameS
 
 Password hashing protects the password, not the stored document. Pad content remains plaintext in D1. Client-side document encryption is outside the current scope.
 
-Password attempts are rate limited both by pad and by Cloudflare client address. Protected content and auth responses use `Cache-Control: no-store`. State-changing requests also require the request `Origin` to match the application origin.
+Password attempts are rate limited both by pad and by Cloudflare client address. Pad creation allows five requests per client and 60 requests across the deployment each minute through Cloudflare rate-limit bindings. An indexed D1 count also stops creation at 10,000 active pads before password derivation or insertion. Protected content and auth responses use `Cache-Control: no-store`. State-changing requests also require the request `Origin` to match the application origin.
 
 ## Markdown safety
 
@@ -178,8 +178,6 @@ Opening `/` displays the creation form. The successful `POST /api/pads` response
 ## Deferred work
 
 - Three-way merge UI and the exact conflict-resolution library
-- Hourly Cron Trigger wrapper for expiry cleanup
-- Abuse controls for pad creation
 - More live-preview syntax
 - Read-only rendered mode
 - Pad download or export
