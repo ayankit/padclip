@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "clipped",
+	"name": "padclip",
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"compatibility_flags": ["nodejs_als"],
 	"compatibility_date": "2026-09-04",
@@ -32,8 +32,8 @@
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_name": "clipped-db",
-			"database_id": "3b627a06-e433-4412-9a54-82f5eadb2aee",
+			"database_name": "padclip",
+			"database_id": "f0a7c49b-3d3e-4fd5-8a87-f111150e937c",
 			"migrations_dir": "./drizzle",
 			"migrations_pattern": "./drizzle/*/migration.sql"
 		}

@@ -1,6 +1,6 @@
-# Clipped
+# PadClip
 
-Clipped is a temporary, password-protected pad for Markdown and source code. Create a pad with a password, share its six-character URL, and manually save edits from a source-preserving CodeMirror 6 editor.
+PadClip is a temporary shared pad for Markdown and source code. Opening the app creates a short URL that anyone with access can use to read, edit, and manually save the pad.
 
 The current proof of concept includes:
 
@@ -73,4 +73,4 @@ Pad rows contain an `updated_at` timestamp and the repository includes the expir
 
 ## Documentation
 
-See [Clipped architecture](docs/architecture.md) for the storage, authentication, editor, save, conflict, and expiry decisions.
+See [PadClip architecture](docs/architecture.md) for the current storage, expiry, editor, password, save, and conflict-handling decisions.
