@@ -1,14 +1,15 @@
 # Clipped architecture
 
-This document records the current decisions for Clipped. It describes the first version we intend to build, plus the few areas we have deliberately left for later.
+This document records the current decisions for Clipped and distinguishes the implemented proof of concept from deferred work.
 
 ## Product behavior
 
-- Opening `/` creates a new pad and redirects the browser to `/p/{id}`.
+- Opening `/` shows a creation form. Submitting Markdown and a password creates a pad and redirects the browser to `/p/{id}`.
 - Pad IDs contain six case-sensitive alphanumeric characters.
 - The server generates an ID, attempts to insert it into D1, and retries if the primary key already exists. Random generation alone does not guarantee uniqueness.
-- Anyone who can open an unprotected pad may read and edit it.
-- A protected pad requires its password before the server returns its content or accepts a save.
+- Every pad requires a password. There are no accounts, so a relevant user is someone who knows the pad password or already has a valid session for that pad.
+- The Worker requires a valid pad session before it returns content or accepts a save.
+- Password recovery, password changes, and administrator bypasses are deliberately absent.
 - Saving is manual. There is no autosave, polling, WebSocket connection, or live collaboration.
 - A pad remains readable while its D1 row exists. Reads do not apply a separate expiry check.
 
@@ -56,28 +57,25 @@ pads
   updated_at         INTEGER NOT NULL
 
 pad_auth
-  pad_id             TEXT PRIMARY KEY
+  pad_id             TEXT PRIMARY KEY, FOREIGN KEY -> pads.id ON DELETE CASCADE
   password_salt      BLOB NOT NULL
   password_verifier  BLOB NOT NULL
-  kdf                 TEXT NOT NULL
-  kdf_parameters     TEXT NOT NULL
-  password_version   INTEGER NOT NULL
 ```
 
-Timestamps use UTC Unix seconds. Keeping authentication data in a separate row makes the content row simpler and leaves more headroom for the document.
+Timestamps use UTC Unix seconds. Keeping authentication data in a separate row makes the content row simpler. The KDF and its parameters are fixed in Worker code, so they are not repeated in every row. There is also no password version because passwords cannot be changed.
 
 ## Expiry and cleanup
 
 Pads expire through deletion, not through read-time rejection.
 
-An hourly Cloudflare Cron Trigger deletes pads whose `updated_at` is more than 24 hours old. This makes the policy 24 hours since the last successful save. Because cleanup is periodic, a pad may remain available for part of the next hour. That is expected.
+The repository implements deletion of pads whose `updated_at` is more than 24 hours old. This makes the intended policy 24 hours since the last successful save.
 
 ```sql
 DELETE FROM pads
 WHERE updated_at < unixepoch() - 86400;
 ```
 
-Related `pad_auth` rows must be removed in the same cleanup, either through a foreign key cascade that D1 enforces for the operation or through an explicit delete. If a cron run deletes a pad while someone has it open, the next save returns not found.
+The foreign key removes the matching `pad_auth` row with the pad. Wiring this operation to an hourly Cloudflare Cron Trigger is deferred because the SvelteKit adapter generates an HTTP-only Worker entry point. That deployment step needs a custom wrapper entry point. Once enabled, periodic cleanup means a pad can remain available for part of the next hour; if cleanup deletes an open pad, its next save returns not found.
 
 ## Saving and conflicts
 
@@ -106,9 +104,9 @@ The first release may show a clear conflict message without resolving it. A late
 
 ## Markdown editor
 
-CodeMirror 6 is the editor foundation. The Markdown string remains the only document source. Rendering is applied through CodeMirror styling, decorations, and widgets instead of converting the document into a rich-text model and serializing it back.
+CodeMirror 6 is the editor foundation. The Markdown string remains the only document source. The current proof of concept provides source editing and syntax highlighting without converting the document into a rich-text model and serializing it back.
 
-This choice gives us exact Markdown preservation, viewport rendering for large documents, language-aware fenced code blocks, and access to CodeMirror's merge view for the future conflict screen.
+This choice gives exact Markdown preservation, viewport rendering for large documents, language-aware fenced code blocks, and access to CodeMirror's merge view for a future conflict screen. Live-preview decorations can be layered onto the source editor later without replacing the source string.
 
 ### UI ownership
 
@@ -122,9 +120,9 @@ The UI is fully customisable:
 
 CodeMirror supplies the editing engine, not a fixed application shell. We do not need to accept a bundled toolbar or visual design.
 
-### Initial live-preview scope
+### Planned live-preview scope
 
-The first live-preview layer should cover the syntax that matters for code-heavy pads:
+The live-preview layer should cover the syntax that matters for code-heavy pads:
 
 - ATX headings
 - bold, italic, and strikethrough
@@ -143,13 +141,21 @@ CodeMirror touches browser DOM APIs, so the Svelte component creates it in `onMo
 
 ## Password protection
 
-The password is never stored as plaintext. The Worker stores a unique salt, a slow password verifier, the KDF name, and its parameters. PBKDF2-HMAC-SHA-256 through Workers Web Crypto is the current implementation candidate. The exact work factor must be benchmarked in the deployed Worker before it is fixed.
+The password is never stored as plaintext. For each pad, the Worker generates a 16-byte random salt and uses PBKDF2-HMAC-SHA-256 with 600,000 iterations to derive an HMAC key. It signs a fixed context string with that key and stores the resulting verifier alongside the salt. Verification derives the same key from the submitted password and asks Web Crypto to verify the stored HMAC.
 
-After a successful unlock, the Worker issues a short-lived signed session cookie with `HttpOnly`, `Secure`, and `SameSite` attributes. The session includes the pad ID and password version. Saves and content reads verify this session. Password verification does not run on every save.
+There is no deployment-wide pepper or secret involved in password derivation. Under the current threat model, D1 is trusted. Anyone who obtains both the salt and verifier can make offline password guesses, which is why the slow KDF and strong user passwords matter. They cannot reverse the verifier directly into the original password.
+
+The iteration count and algorithm live only in Worker code. If either changes later, existing rows would require a version or migration strategy. That complexity is intentionally omitted while passwords are immutable.
+
+After pad creation or a successful unlock, the Worker issues a pad-specific session cookie valid for 24 hours. Its JSON payload contains a format version, pad ID, issued-at time, and expiry. The Worker signs the encoded payload with HMAC-SHA-256 using `SESSION_SIGNING_KEY` and rejects altered, expired, or wrong-pad sessions.
+
+The cookie uses a `__Host-` name plus `Path=/`, `HttpOnly`, `Secure`, and `SameSite=Strict`. Content reads and saves verify the signature and claims, so the expensive password KDF does not run on every request.
+
+`SESSION_SIGNING_KEY` is a random deployment secret of at least 32 bytes. It proves that a session was issued by this Worker; it does not encrypt content and is not used for password hashing. Rotating the key logs everyone out because existing cookie signatures stop verifying, but stored password verifiers and pads remain valid.
 
 Password hashing protects the password, not the stored document. Pad content remains plaintext in D1. Client-side document encryption is outside the current scope.
 
-Password attempts need rate limiting by client and pad. Protected content responses must use `Cache-Control: no-store`.
+Password attempts are rate limited both by pad and by Cloudflare client address. Protected content and auth responses use `Cache-Control: no-store`. State-changing requests also require the request `Origin` to match the application origin.
 
 ## Markdown safety
 
@@ -157,7 +163,7 @@ Editor decorations must construct known DOM elements and set user content as tex
 
 If a later read-only mode converts Markdown to HTML, it must sanitize the result and disable raw HTML by default. Links and images need an explicit URL policy that rejects schemes such as `javascript:`.
 
-## Planned route shape
+## Route shape
 
 ```text
 POST /api/pads                 create a pad
@@ -167,13 +173,13 @@ PUT  /api/pads/[id]            save using an expected version
 POST /api/pads/[id]/unlock     verify a password and start a session
 ```
 
-Opening `/` initiates pad creation and then navigates to the returned pad URL. Empty pads created by refreshes or abandoned visits follow the same cleanup policy as other pads.
+Opening `/` displays the creation form. The successful `POST /api/pads` response creates a session for the new pad and the browser navigates to the returned URL.
 
 ## Deferred work
 
 - Three-way merge UI and the exact conflict-resolution library
-- Password creation and password-change UI
-- Abuse controls for automatic pad creation
+- Hourly Cron Trigger wrapper for expiry cleanup
+- Abuse controls for pad creation
 - More live-preview syntax
 - Read-only rendered mode
 - Pad download or export
